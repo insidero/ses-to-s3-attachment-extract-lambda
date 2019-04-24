@@ -1,0 +1,87 @@
+from __future__ import print_function
+
+import email
+import zipfile
+import os
+import gzip
+import string
+import boto3
+import urllib
+import uuid
+
+print('Loading function')
+
+s3 = boto3.client('s3')
+s3r = boto3.resource('s3')
+xmlDir = "/tmp/output/"
+
+outputBucket = "BUCKET"  # Set the cucket name here
+outputPrefix = "attachments/"  # Should end with /
+
+
+def lambda_handler(event, context):
+    bucket = event['Records'][0]['s3']['bucket']['name']
+    print(bucket)
+    key = ""+event['Records'][0]['s3']['object']['key']
+    print (key)
+
+    try:
+        
+        
+
+        # Use waiter to ensure the file is persisted
+        waiter = s3.get_waiter('object_exists')
+        waiter.wait(Bucket=bucket, Key=key)
+
+        response = s3r.Bucket(bucket).Object(key)
+    
+        # Read the raw text file into a Email Object
+        msg = email.message_from_string(response.get()["Body"].read())
+        
+        print(msg.get_payload())
+        
+
+        # Create directory for XML files (makes debugging easier)
+        if os.path.isdir(xmlDir) == False:
+            os.mkdir(xmlDir)
+
+        # The first attachment
+        attachment = msg.get_payload()[1]
+        print (attachment)
+        # Extract the attachment into /tmp/output
+        extract_attachment(attachment)
+
+        # Upload the XML files to S3
+        upload_resulting_files_to_s3()
+        
+        
+    except Exception as e:
+        print(e)
+        print('Error getting object {} from bucket {}. Make sure they exist '
+            'and your bucket is in the same region as this '
+            'function.'.format(key, bucket))
+        raise e
+   
+    
+
+def extract_attachment(attachment):
+    # Process filename.zip attachments
+    upload_key=str(uuid.uuid1())
+    print("extracting attachment")
+   if "csv" in attachment.get_content_type():
+        print("got CSV")
+        open('/tmp/attachment.csv', 'wb').write(attachment.get_payload(decode=True))
+        
+        s3r.meta.client.upload_file('/tmp/attachment.csv', outputBucket, outputPrefix+upload_key+".csv")
+        print('Uploaded')
+    elif "application/octet-stream" in attachment.get_content_type():
+        print("got appilcation/octet-stream")
+        open('/tmp/attachment.csv', 'wb').write(attachment.get_payload(decode=True))
+        
+        s3r.meta.client.upload_file('/tmp/attachment.csv', outputBucket, outputPrefix+upload_key+".csv")
+        print('Uploaded')
+    else:
+        
+        print('Skipping ' + attachment.get_content_type())
+
+
